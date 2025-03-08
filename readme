@@ -1,289 +1,389 @@
-# AWS MERN Stack Deployment Guide
+# AWS EC2 Deployment Guide for PHP & MySQL/MariaDB Applications
 
 ## Step 1: Launch an EC2 Instance
 
 1. Log in to AWS Management Console.
 2. Navigate to EC2 Dashboard → Click Launch Instance.
-3. Choose Ubuntu 22.04 LTS (recommended) as your OS.
-4. Select t2.micro (free-tier eligible) or a higher instance if needed.
+3. Choose Ubuntu 22.04 LTS as your OS.
+4. Select t2.micro (free-tier eligible) or a higher instance type if needed.
 5. Click Next: Configure Instance Details → Keep default settings.
 6. Click Next: Add Storage → Increase root volume (at least 20GB recommended).
-7. Click Next: Add Tags → Add a tag (optional, e.g., Name = MERN-Server).
-8. Click Next: Configure Security Group: 
-   - Add rules: 
+7. Click Next: Add Tags → Add a tag (optional, e.g., Name = PHP-Server).
+8. Click Next: Configure Security Group:
+   - Add rules:
      - SSH (22) → Source: My IP
      - HTTP (80) → Source: Anywhere (0.0.0.0/0)
      - HTTPS (443) → Source: Anywhere (0.0.0.0/0)
-     - Custom TCP (3000, 5000, etc.) → Source: Anywhere (0.0.0.0/0)
+     - MySQL (3306) → Source: My IP (for remote database access, optional)
 9. Click Review and Launch.
 10. Create and download a new key pair (.pem file) → Launch Instance.
 
-## Step 2: Connect to EC2 via PuTTY
+## Step 2: Connect to Your EC2 Instance
 
-1. Convert .pem to .ppk for PuTTY: 
+### For Windows Users (PuTTY):
+1. Convert .pem to .ppk using PuTTYgen:
    - Open PuTTYgen → Load .pem file → Save Private Key (.ppk).
-2. Open PuTTY and connect: 
-   - Host Name: ubuntu@your-ec2-public-ip (for Ubuntu instances)
+2. Connect using PuTTY:
+   - Host Name: ubuntu@your-ec2-public-ip
    - Port: 22
    - Auth: Load the .ppk file under "SSH → Auth → Credentials"
    - Click Open.
 
-**Common Errors:**
-- Connection timeout: Ensure SSH (22) is allowed in Security Group.
-- Server refused key: Use correct .ppk file.
-- Permission denied: Change key permissions (chmod 400 key.pem in Linux/Mac).
+### For macOS/Linux Users:
+1. Open Terminal.
+2. Set permissions for your key:
+   ```sh
+   chmod 400 your-key.pem
+   ```
+3. Connect via SSH:
+   ```sh
+   ssh -i your-key.pem ubuntu@your-ec2-public-ip
+   ```
 
-## Step 3: Update & Install Required Packages
+## Step 3: Update System and Install LAMP Stack
 
-Run the following in PuTTY:
-
+Update system packages:
 ```sh
 sudo apt update && sudo apt upgrade -y
 ```
 
-### Install Node.js and npm
-
+### Install Apache Web Server
 ```sh
-# Remove existing Node.js and npm (if any)
-sudo apt remove --purge nodejs npm -y
-sudo apt autoremove -y
-
-# Install Node.js from NodeSource
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Verify installation
-node -v
-npm -v
+sudo apt install apache2 -y
+sudo systemctl enable apache2
+sudo systemctl start apache2
 ```
 
-### Install MongoDB Community Edition
-
-1. Import the public key:
+### Install PHP and Common Extensions
 ```sh
-sudo apt-get install gnupg curl -y
-curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
-  sudo gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
-  --dearmor
+sudo apt install php libapache2-mod-php php-mysql php-curl php-gd php-json php-zip php-mbstring php-xml php-intl -y
 ```
 
-2. Create the list file (for Ubuntu 22.04 Jammy):
+Verify PHP installation:
 ```sh
-echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+php -v
 ```
 
-3. Reload the package database:
+### Install MySQL or MariaDB
+
+#### Option 1: MySQL
 ```sh
-sudo apt-get update
+sudo apt install mysql-server -y
+sudo systemctl enable mysql
+sudo systemctl start mysql
+
+# Secure MySQL installation
+sudo mysql_secure_installation
 ```
 
-4. Install MongoDB Community Server:
+#### Option 2: MariaDB
 ```sh
-sudo apt-get install -y mongodb-org
+sudo apt install mariadb-server -y
+sudo systemctl enable mariadb
+sudo systemctl start mariadb
+
+# Secure MariaDB installation
+sudo mysql_secure_installation
 ```
 
-5. Start MongoDB and enable on boot:
+During the secure installation, you'll be prompted to:
+- Set a root password
+- Remove anonymous users
+- Disallow root login remotely
+- Remove test database
+- Reload privilege tables
+
+### Create a Database and User
 ```sh
-sudo systemctl start mongod
-sudo systemctl enable mongod
-sudo systemctl status mongod
+sudo mysql -u root -p
 ```
 
-**Common Errors:**
-- MongoDB failed to start: Run `sudo journalctl -xe` for logs.
-- Node.js not found: Check `which node` or re-install Node.js.
+Run these SQL commands:
+```sql
+CREATE DATABASE your_database;
+CREATE USER 'your_user'@'localhost' IDENTIFIED BY 'your_secure_password';
+GRANT ALL PRIVILEGES ON your_database.* TO 'your_user'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
 
-## Step 4: Transfer MERN Project Using FileZilla
+## Step 4: Configure Apache Virtual Host
 
+Create a new virtual host configuration:
+```sh
+sudo nano /etc/apache2/sites-available/your-domain.conf
+```
+
+Add this configuration:
+```apache
+<VirtualHost *:80>
+    ServerName your-domain.com
+    ServerAlias www.your-domain.com
+    ServerAdmin webmaster@your-domain.com
+    DocumentRoot /var/www/html/your-project
+
+    <Directory /var/www/html/your-project>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/your-domain-error.log
+    CustomLog ${APACHE_LOG_DIR}/your-domain-access.log combined
+</VirtualHost>
+```
+
+Save and exit.
+
+Create the web directory:
+```sh
+sudo mkdir -p /var/www/html/your-project
+```
+
+Enable the virtual host and rewrite module:
+```sh
+sudo a2ensite your-domain.conf
+sudo a2enmod rewrite
+sudo systemctl restart apache2
+```
+
+## Step 5: Transfer Your PHP Application
+
+### Option 1: Using FileZilla (SFTP)
 1. Open FileZilla.
 2. Go to Edit → Settings → SFTP → Add key file (.pem or .ppk).
-3. In FileZilla Site Manager: 
+3. In FileZilla Site Manager:
    - Host: your-ec2-public-ip
    - Protocol: SFTP
-   - User: ubuntu (for Ubuntu EC2 instances)
+   - User: ubuntu
    - Password: Leave blank
    - Logon Type: Key File
-   - Key File: Select .ppk
+   - Key File: Select your .ppk file
    - Click Connect.
-4. Upload your MERN project to /home/ubuntu/project.
+4. Navigate to /var/www/html/your-project in the remote server.
+5. Upload your PHP files.
 
-**Common Errors:**
-- Permission denied: Use `sudo chmod -R 755 /home/ubuntu/project`
-- Cannot connect: Ensure EC2 Public IP and SFTP rule (22) are correct.
+### Option 2: Using Git
+1. Install Git:
+   ```sh
+   sudo apt install git -y
+   ```
+2. Navigate to your project directory:
+   ```sh
+   cd /var/www/html
+   ```
+3. Clone your repository:
+   ```sh
+   sudo git clone https://github.com/username/your-project.git
+   ```
 
-## Step 5: Install Dependencies & Start Backend
-
-1. Navigate to your project:
+### Option 3: Using SCP (Secure Copy)
+From your local machine:
 ```sh
-cd /home/ubuntu/project/backend
+scp -i your-key.pem -r /path/to/local/project ubuntu@your-ec2-public-ip:/var/www/html/your-project
 ```
 
-2. Install dependencies:
+## Step 6: Set Proper Permissions
+
+Set ownership:
 ```sh
-npm install
+sudo chown -R www-data:www-data /var/www/html/your-project
 ```
 
-3. Start backend using PM2 (production process manager):
+Set proper permissions:
 ```sh
-# Install PM2
-npm install -g pm2
-
-# Start the server with PM2
-pm2 start server.js
-
-# Save the PM2 process list
-pm2 save
-
-# Configure PM2 to start on system boot
-pm2 startup
+sudo find /var/www/html/your-project -type d -exec chmod 755 {} \;
+sudo find /var/www/html/your-project -type f -exec chmod 644 {} \;
 ```
 
-**Common Errors:**
-- Module not found: Run `npm install`
-- Port already in use: Use `lsof -i :5000` to check and `kill -9 PID` to free the port
+## Step 7: Configure PHP Application
 
-## Step 6: Deploy Frontend
-
-1. Navigate to frontend folder:
+Create a configuration file if needed:
 ```sh
-cd /home/ubuntu/project/frontend
+sudo nano /var/www/html/your-project/config.php
 ```
 
-2. Install dependencies:
-```sh
-npm install
-```
+Example configuration file:
+```php
+<?php
+// Database connection
+define('DB_HOST', 'localhost');
+define('DB_USER', 'your_user');
+define('DB_PASS', 'your_secure_password');
+define('DB_NAME', 'your_database');
 
-3. Build project:
-```sh
-npm run build
-```
+// Connect to database
+$conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 
-4. Install & configure NGINX:
-```sh
-sudo apt install nginx -y
-sudo nano /etc/nginx/sites-available/default
-```
-
-Replace the default configuration with:
-
-```nginx
-server {
-    listen 80;
-    server_name your-ec2-public-ip;
-
-    location / {
-        root /home/ubuntu/project/frontend/build;
-        index index.html;
-        try_files $uri /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://localhost:5000/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
+?>
 ```
 
-Save and restart NGINX:
+## Step 8: Set Up SSL/TLS with Certbot
+
+Install Certbot:
 ```sh
-sudo systemctl restart nginx
-sudo systemctl status nginx
+sudo apt install certbot python3-certbot-apache -y
 ```
 
-## Step 7: Enable HTTPS (SSL)
-
-1. Install Certbot:
+Obtain and install SSL certificate:
 ```sh
-sudo apt install certbot python3-certbot-nginx -y
+sudo certbot --apache -d your-domain.com -d www.your-domain.com
 ```
 
-2. Obtain and configure SSL certificate:
-```sh
-sudo certbot --nginx -d your-domain.com
-```
+Follow the prompts to complete the setup.
 
-3. Test auto-renewal:
+Test certificate auto-renewal:
 ```sh
 sudo certbot renew --dry-run
 ```
 
-## Alternative: Deploying a Next.js Application
+## Step 9: Configure PHP for Production
 
-### For Next.js Projects
-
-1. Navigate to your project:
+Edit php.ini:
 ```sh
-cd /home/ubuntu/project/nextjs-app
+sudo nano /etc/php/*/apache2/php.ini
 ```
 
-2. Install dependencies:
+Recommended production settings:
+```ini
+memory_limit = 256M
+upload_max_filesize = 64M
+post_max_size = 64M
+max_execution_time = 300
+display_errors = Off
+error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT
+log_errors = On
+error_log = /var/log/php_errors.log
+date.timezone = UTC
+```
+
+Restart Apache:
 ```sh
-npm install
+sudo systemctl restart apache2
 ```
 
-3. Build the Next.js application:
+## Step 10: Install phpMyAdmin (Optional)
+
+Install phpMyAdmin:
 ```sh
-npm run build
+sudo apt install phpmyadmin -y
 ```
 
-4. Start Next.js in production mode with PM2:
+During installation:
+- Select Apache2 when prompted
+- Choose to configure database with dbconfig-common
+- Set phpMyAdmin password
+
+Secure phpMyAdmin:
 ```sh
-pm2 start npm --name "nextjs" -- start
-pm2 save
+sudo nano /etc/apache2/conf-available/phpmyadmin.conf
 ```
 
-5. Configure NGINX for Next.js:
+Add these lines inside the `<Directory /usr/share/phpmyadmin>` section:
+```apache
+AllowOverride All
+<IfModule mod_authz_core.c>
+    <RequireAny>
+        Require ip YOUR_IP_ADDRESS
+        Require local
+    </RequireAny>
+</IfModule>
+```
+
+Create a .htaccess file for additional security:
 ```sh
-sudo nano /etc/nginx/sites-available/default
+sudo nano /usr/share/phpmyadmin/.htaccess
 ```
 
-Replace with:
-```nginx
-server {
-    listen 80;
-    server_name your-ec2-public-ip;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
+Add:
+```apache
+AuthType Basic
+AuthName "Restricted Access"
+AuthUserFile /etc/phpmyadmin/.htpasswd
+Require valid-user
 ```
 
-### For Vite-based Development Servers
-
-If you need to expose your development server on port 5173:
-
-1. Open port 5173 in AWS Security Group:
-   - Go to AWS EC2 Dashboard
-   - Select your EC2 instance
-   - Click on the Security Groups
-   - Under the Inbound rules tab, click Edit inbound rules
-   - Add Rule: Custom TCP (5173), Source: 0.0.0.0/0
-   - Click Save rules
-
-2. Run Vite with public access:
+Create a username/password for phpMyAdmin access:
 ```sh
-npm run dev -- --host 0.0.0.0
+sudo htpasswd -c /etc/phpmyadmin/.htpasswd your_username
 ```
 
-3. Access the app at: `http://your-ec2-public-ip:5173/`
+Enable the configuration and restart Apache:
+```sh
+sudo a2enconf phpmyadmin
+sudo systemctl restart apache2
+```
 
-**Note:** For production, build the application and serve it through NGINX instead of exposing the development server.
+## Step 11: Set Up Database Backups
 
-## Common Debugging Issues
+Create a backup script:
+```sh
+sudo nano /usr/local/bin/backup-db.sh
+```
 
-- NGINX Configuration Error: Run `sudo nginx -t` to check config
-- MongoDB connection failed: Ensure MongoDB is running (`sudo systemctl status mongod`) and update connection strings in your application
-- Frontend not loading: Check that the build folder exists and NGINX has proper permissions
-- Security issues: Ensure firewall allows necessary ports (`sudo ufw status`)
-- Application crashes: Check PM2 logs with `pm2 logs`
+Add this content:
+```sh
+#!/bin/bash
+TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+BACKUP_DIR="/home/ubuntu/database-backups"
+MYSQL_USER="your_user"
+MYSQL_PASSWORD="your_secure_password"
+DATABASE_NAME="your_database"
+
+# Create backup directory if it doesn't exist
+mkdir -p $BACKUP_DIR
+
+# Create SQL dump
+mysqldump -u $MYSQL_USER -p$MYSQL_PASSWORD $DATABASE_NAME > $BACKUP_DIR/$DATABASE_NAME-$TIMESTAMP.sql
+
+# Compress backup
+gzip $BACKUP_DIR/$DATABASE_NAME-$TIMESTAMP.sql
+
+# Delete backups older than 30 days
+find $BACKUP_DIR -name "*.sql.gz" -type f -mtime +30 -delete
+```
+
+Make it executable:
+```sh
+sudo chmod +x /usr/local/bin/backup-db.sh
+```
+
+Schedule automatic backups with cron:
+```sh
+sudo crontab -e
+```
+
+Add this line to run the backup daily at 2 AM:
+```
+0 2 * * * /usr/local/bin/backup-db.sh
+```
+
+## Troubleshooting Common Issues
+
+### Apache Issues
+- Check Apache status: `sudo systemctl status apache2`
+- Check Apache error logs: `sudo tail -f /var/log/apache2/error.log`
+- Test Apache configuration: `sudo apache2ctl configtest`
+
+### PHP Issues
+- Check PHP error log: `sudo tail -f /var/log/php_errors.log`
+- Verify PHP modules: `php -m`
+- Test PHP installation: `php -i`
+
+### MySQL/MariaDB Issues
+- Check database status: `sudo systemctl status mysql` or `sudo systemctl status mariadb`
+- Check database logs: `sudo tail -f /var/log/mysql/error.log`
+- Test database connection: `mysql -u your_user -p -h localhost`
+
+### Permission Issues
+- If you get "Permission denied" errors, check ownership: `ls -la /var/www/html/your-project`
+- Fix permissions with: `sudo chown -R www-data:www-data /var/www/html/your-project`
+
+### SSL Issues
+- Verify SSL certificate: `sudo certbot certificates`
+- Renew certificate: `sudo certbot renew`
+- Check SSL configuration: `sudo apache2ctl -t -D DUMP_VHOSTS`
